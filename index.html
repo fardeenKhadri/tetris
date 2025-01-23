@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tetris with Explosions</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #111;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+
+        canvas {
+            border: 2px solid #fff;
+            background: #222;
+        }
+
+        .game-container {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .score {
+            margin-bottom: 10px;
+            font-size: 20px;
+        }
+
+        .instructions {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #ccc;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="game-container">
+        <div class="score">Score: <span id="score">0</span></div>
+        <canvas id="gameCanvas" width="300" height="600"></canvas>
+    </div>
+    <div class="instructions">
+        <p>Controls:</p>
+        <p>Arrow Left/Right: Move Block | Arrow Down: Drop Block | Arrow Up: Rotate Block | P: Pause/Resume</p>
+    </div>
+
+    <audio id="clearSound" src="clear.wav"></audio>
+    <audio id="dieSound" src="die.wav"></audio>
+    <audio id="rotateSound" src="rotate.wav"></audio>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        const clearSound = document.getElementById('clearSound');
+        const dieSound = document.getElementById('dieSound');
+        const rotateSound = document.getElementById('rotateSound');
+
+        const rows = 20;
+        const cols = 10;
+        const blockSize = 30;
+        const board = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+        const colors = [null, 'cyan', 'blue', 'orange', 'yellow', 'green', 'purple', 'red'];
+
+        const tetrominoes = [
+            [[1, 1, 1, 1]], // I
+            [[2, 0, 0], [2, 2, 2]], // J
+            [[0, 0, 3], [3, 3, 3]], // L
+            [[4, 4], [4, 4]], // O
+            [[0, 5, 5], [5, 5, 0]], // S
+            [[0, 6, 0], [6, 6, 6]], // T
+            [[7, 7, 0], [0, 7, 7]] // Z
+        ];
+
+        let currentPiece = { matrix: null, row: 0, col: 0 };
+        let score = 0;
+        let dropCounter = 0;
+        let dropInterval = 1000;
+        let lastTime = 0;
+        let isPaused = false;
+
+        function drawBlock(x, y, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x * blockSize, y * blockSize, blockSize, blockSize);
+            ctx.strokeStyle = '#111';
+            ctx.strokeRect(x * blockSize, y * blockSize, blockSize, blockSize);
+        }
+
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            board.forEach((row, y) => row.forEach((value, x) => {
+                if (value) {
+                    drawBlock(x, y, colors[value]);
+                }
+            }));
+            drawPiece(currentPiece);
+        }
+
+        function drawPiece(piece) {
+            piece.matrix.forEach((row, y) => row.forEach((value, x) => {
+                if (value) {
+                    drawBlock(piece.col + x, piece.row + y, colors[value]);
+                }
+            }));
+        }
+
+        function collide() {
+            const { matrix, row, col } = currentPiece;
+            for (let y = 0; y < matrix.length; ++y) {
+                for (let x = 0; x < matrix[y].length; ++x) {
+                    if (matrix[y][x] && (board[row + y] && board[row + y][col + x]) !== 0) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function mergePiece() {
+            const { matrix, row, col } = currentPiece;
+            matrix.forEach((rowArray, y) => rowArray.forEach((value, x) => {
+                if (value) {
+                    board[row + y][col + x] = value;
+                }
+            }));
+        }
+
+        function clearRows() {
+            for (let y = rows - 1; y >= 0; --y) {
+                if (board[y].every(value => value !== 0)) {
+                    explodeRow(y);
+                    clearSound.play();
+                    board.splice(y, 1);
+                    board.unshift(Array(cols).fill(0));
+                    score += 100;
+                    updateScore();
+                }
+            }
+        }
+
+        function updateScore() {
+            document.getElementById('score').textContent = score;
+        }
+
+        function explodeRow(row) {
+            const particles = [];
+            board[row].forEach((_, x) => {
+                for (let i = 0; i < 10; i++) {
+                    particles.push({
+                        x: (x + 0.5) * blockSize,
+                        y: (row + 0.5) * blockSize,
+                        dx: (Math.random() - 0.5) * 4,
+                        dy: (Math.random() - 0.5) * 4,
+                        alpha: 1
+                    });
+                }
+            });
+
+            function renderParticles() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawBoard();
+                particles.forEach(p => {
+                    p.x += p.dx;
+                    p.y += p.dy;
+                    p.alpha -= 0.02;
+                    ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                if (particles.some(p => p.alpha > 0)) {
+                    requestAnimationFrame(renderParticles);
+                }
+            }
+
+            renderParticles();
+        }
+
+        function dropPiece() {
+            currentPiece.row++;
+            if (collide()) {
+                currentPiece.row--;
+                mergePiece();
+                clearRows();
+                resetPiece();
+            } else {
+                score += 1;
+                updateScore();
+            }
+        }
+
+        function resetPiece() {
+            const pieceType = tetrominoes[Math.floor(Math.random() * tetrominoes.length)];
+            currentPiece.matrix = pieceType;
+            currentPiece.row = 0;
+            currentPiece.col = Math.floor((cols - pieceType[0].length) / 2);
+            if (collide()) {
+                dieSound.play();
+                alert("Game Over!");
+                board.forEach(row => row.fill(0));
+                score = 0;
+                updateScore();
+            }
+        }
+
+        function update(time = 0) {
+            if (isPaused) return;
+
+            const deltaTime = time - lastTime;
+            lastTime = time;
+            dropCounter += deltaTime;
+            if (dropCounter > dropInterval) {
+                dropPiece();
+                dropCounter = 0;
+            }
+            drawBoard();
+            requestAnimationFrame(update);
+        }
+
+        document.addEventListener('keydown', event => {
+            if (event.key === 'ArrowLeft') {
+                currentPiece.col--;
+                if (collide()) currentPiece.col++;
+            } else if (event.key === 'ArrowRight') {
+                currentPiece.col++;
+                if (collide()) currentPiece.col--;
+            } else if (event.key === 'ArrowDown') {
+                dropPiece();
+            } else if (event.key === 'ArrowUp') {
+                const rotated = currentPiece.matrix[0].map((_, i) => currentPiece.matrix.map(row => row[i]).reverse());
+                const prevMatrix = currentPiece.matrix;
+                currentPiece.matrix = rotated;
+                rotateSound.play();
+                if (collide()) currentPiece.matrix = prevMatrix;
+            } else if (event.key === 'p' || event.key === 'P') {
+                isPaused = !isPaused;
+                if (!isPaused) update();
+            }
+        });
+
+        resetPiece();
+        update();
+    </script>
+</body>
+
+</html>
